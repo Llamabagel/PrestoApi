@@ -39,13 +39,38 @@ namespace PrestoApi.Models.Presto
         /// <summary>
         /// The username of the account being accessed. For anonymous cards, this is the serial number
         /// of that PRESTO card.
-        /// <see cref="Registered"/>
+        /// <see cref="Type"/>
         /// </summary>
         public string Username { get; set; }
 
         /// <summary>
         /// The password of the account being accessed. Null for anonymous cards.
         /// </summary>
+        [Obsolete]
         public string Password { get; set; }
+        
+        /// <summary>
+        /// The .ASPXAUTH token that can be used to access the PRESTO dashboard in place of the user's password.
+        /// </summary>
+        public Auth Auth { get; set; }
+    }
+
+    /// <summary>
+    /// Authentication data required to access the PRESTO services.
+    /// Used in place of direct username / password requests
+    /// </summary>
+    public class Auth
+    {
+        /// <summary>
+        /// The authentication token used to access the PRESTO website.
+        /// It's stored in a cookie named .ASPXAUTH.
+        /// </summary>
+        public string Token { get; set; }
+        
+        /// <summary>
+        /// The Sesson ID of the current login.
+        /// Stored in a cookie named ASP.NET_SessionId
+        /// </summary>
+        public string SessionId { get; set; }
     }
 }

@@ -202,6 +202,12 @@ namespace PrestoApi.Models.Presto
         /// Just in case anything else explodes or something
         /// </summary>
         public const int OtherError = -1;
+
+        /// <summary>
+        /// Status code when a login attempt is made with insufficient authentication data.
+        /// Only used when logging in using non-password authentication methods.
+        /// </summary>
+        public const int BadAuth = 50;
     }
 
     /// <summary>

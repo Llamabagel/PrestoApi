@@ -63,77 +63,26 @@ namespace PrestoApi.Controllers
         {
             var summaryAccount = new SummaryAccount
             {
-                Username = request.Username,
+                Username = request.Username.Trim(),
                 Type = request.Type
             };
 
-            var primaryAddress = new Uri("https://prestocard.ca");
+            var cookieContainer = new CookieContainer();
             var client =
-                new HttpClient(new HttpClientHandler {UseCookies = true, CookieContainer = new CookieContainer()})
+                new HttpClient(new HttpClientHandler {UseCookies = true, CookieContainer = cookieContainer})
                 {
-                    BaseAddress = primaryAddress
+                    BaseAddress = new Uri("https://www.prestocard.ca")
                 };
 
-            string loginJson;
-            HttpRequestMessage httpRequest;
-
-            if (request.Type == Models.Presto.Request.TypeRegistered)
-            {
-                // Create the login request
-                loginJson = "{\"custSecurity\":{\"Login\":\"" + request.Username + "\",\"Password\":\"" +
-                            request.Password + "\"},\"anonymousOrderACard\":false}";
-                httpRequest = new HttpRequestMessage(HttpMethod.Post,
-                    "https://www.prestocard.ca/api/sitecore/AFMSAuthentication/SignInWithAccount")
-                {
-                    Content = new StringContent(loginJson, Encoding.UTF8, "application/json")
-                };
-            }
-            else
-            {
-                // Create the anonymous login request
-                loginJson = "{\"anonymousOrderACard\":true,\"fareMediaId\":\"" + request.Username + "\"}";
-                httpRequest = new HttpRequestMessage(HttpMethod.Post,
-                    "https://www.prestocard.ca/api/sitecore/AFMSAuthentication/SignInWithFareMedia")
-                {
-                    Content = new StringContent(loginJson, Encoding.UTF8, "application/json")
-                };
-            }
-
-            // Login to PRESTO and save the required auth cookies
-            var loginResult = await client.SendAsync(httpRequest);
-            var body = await loginResult.Content.ReadAsStringAsync();
-
-            // Check for login errors
-            if (request.Type == Models.Presto.Request.TypeRegistered)
-            {
-                switch (body)
-                {
-                    case
-                    "\"You could not be logged in to your online account. Please check your username and password and try again.\""
-                    :
-                        summaryAccount.Error = ResponseCode.WrongUsernamePassword;
-                        return summaryAccount;
-                    case
-                    "\"Your account has been locked as a result of three failed attempts to sign in. Please reset your password to access your account.\""
-                    :
-                        summaryAccount.Error = ResponseCode.AccountLocked;
-                        return summaryAccount;
-                }
-            }
-            if (request.Type == Models.Presto.Request.TypeAnonymous)
-            {
-                switch (body)
-                {
-                    case
-                    "{\"result\":false,\"message\":\"Your PRESTO card is already registered to an account.Please log in using your username and password.\"}"
-                    :
-                        summaryAccount.Error = ResponseCode.WrongType;
-                        return summaryAccount;
-                    case "{\"result\":false,\"message\":\"Incorrect PRESTO card serial number\"}":
-                        summaryAccount.Error = ResponseCode.BadSerialCode;
-                        return summaryAccount;
-                }
-            }
+             // Login to the PRESTO website.
+            var loginResult = Login(request, ref client, ref cookieContainer);
+             // Record any login failures and return the response
+             if (loginResult != ResponseCode.AccessOk)
+             {
+                 summaryAccount.Error = loginResult;
+                 return summaryAccount;
+             }
+            
 
             // Get the PRESTO dashboard
             var nextResult = await client.GetAsync("/en/dashboard");
@@ -219,77 +168,27 @@ namespace PrestoApi.Controllers
         {
             var newResponse = new Response
             {
-                Username = account.Username,
+                Username = account.Username.Trim(),
                 Type = account.Type
             };
 
+            var cookieContainer = new CookieContainer();
             // Create an HttpClient instance to handle all web operations on the PRESTO card site for this account.
             var client =
-                new HttpClient(new HttpClientHandler {UseCookies = true, CookieContainer = new CookieContainer()})
+                new HttpClient(new HttpClientHandler {UseCookies = true, CookieContainer = cookieContainer})
                 {
-                    BaseAddress = new Uri("https://prestocard.ca")
+                    BaseAddress = new Uri("https://www.prestocard.ca")
                 };
 
-            // JSON string containing login details for the account.
-            string loginJson;
-            // The Http request for to login with the account. Either for a Registered or Anonymous account.
-            HttpRequestMessage httpRequest;
-
-            if (account.Type == Models.Presto.Request.TypeRegistered)
+            // Login to the PRESTO website.
+            var loginResult = Login(account, ref client, ref cookieContainer);
+            
+            // Record any login failures and return the response
+            if (loginResult != ResponseCode.AccessOk)
             {
-                // Create the login request
-                loginJson = "{\"custSecurity\":{\"Login\":\"" + account.Username + "\",\"Password\":\"" +
-                            account.Password + "\"},\"anonymousOrderACard\":false}";
-                httpRequest = new HttpRequestMessage(HttpMethod.Post,
-                    "https://www.prestocard.ca/api/sitecore/AFMSAuthentication/SignInWithAccount")
-                {
-                    Content = new StringContent(loginJson, Encoding.UTF8, "application/json")
-                };
-            }
-            else
-            {
-                // Create the anonymous login request
-                loginJson = "{\"anonymousOrderACard\":true,\"fareMediaId\":\"" + account.Username + "\"}";
-                httpRequest = new HttpRequestMessage(HttpMethod.Post,
-                    "https://www.prestocard.ca/api/sitecore/AFMSAuthentication/SignInWithFareMedia")
-                {
-                    Content = new StringContent(loginJson, Encoding.UTF8, "application/json")
-                };
-            }
-
-            // Login to PRESTO and save the login result.       
-            var loginResult = client.SendAsync(httpRequest).Result.Content.ReadAsStringAsync().Result;
-
-
-            // Check for login errors. Aborts the function if any errors were detected.
-            // ReSharper disable once ConvertIfStatementToSwitchStatement
-            if (loginResult ==
-                "\"You could not be logged in to your online account. Please check your username and password and try again.\""
-            )
-            {
-                newResponse.Error = ResponseCode.WrongUsernamePassword;
+                newResponse.Error = loginResult;
                 return newResponse;
             }
-            if (loginResult ==
-                "\"Your account has been locked as a result of three failed attempts to sign in. Please reset your password to access your account.\""
-            )
-            {
-                newResponse.Error = ResponseCode.AccountLocked;
-                return newResponse;
-            }
-            if (loginResult ==
-                "{\"result\":false,\"message\":\"Your PRESTO card is already registered to an account.Please log in using your username and password.\"}"
-            )
-            {
-                newResponse.Error = ResponseCode.WrongType;
-                return newResponse;
-            }
-            if (loginResult == "{\"result\":false,\"message\":\"Incorrect PRESTO card serial number\"}")
-            {
-                newResponse.Error = ResponseCode.BadSerialCode;
-                return newResponse;
-            }
-
 
             // Navigate to the PRESTO dashboard
             var nextResult = await client.GetAsync("/en/dashboard");
@@ -452,6 +351,127 @@ namespace PrestoApi.Controllers
             }
 
             return newResponse;
+        }
+        
+        /// <summary>
+        /// Logs in to the PRESTO website using the given account credentials. Saves the required authentication cookies
+        /// in the client.
+        /// </summary>
+        /// <param name="account">The account to sign in to.</param>
+        /// <param name="client">The HttpClient to save useful cookies and stuff in. By reference.</param>
+        /// <param name="cookieContainer">The cookie container being used by the client</param>
+        /// <returns>A <see cref="ResponseCode"/></returns>
+        private static int Login(AccountRequest account, ref HttpClient client, ref CookieContainer cookieContainer)
+        {
+            // "Log in" using authentication token instead of username and password. 
+            if (account.Auth != null)
+            {
+                if (string.IsNullOrEmpty(account.Auth.Token) || string.IsNullOrEmpty(account.Auth.SessionId))
+                {
+                    return ResponseCode.BadAuth;
+                }
+                
+                cookieContainer.Add(client.BaseAddress, new Cookie(".ASPXAUTH", account.Auth.Token));
+                cookieContainer.Add(client.BaseAddress, new Cookie("ASP.NET_SessionId", account.Auth.SessionId));
+                
+                return ResponseCode.AccessOk;
+            }
+            
+            string loginJson;
+            HttpRequestMessage httpRequest;
+            if (account.Type == Models.Presto.Request.TypeRegistered)
+            {
+                // Create the login request
+                loginJson = "{\"custSecurity\":{\"Login\":\"" + account.Username.Trim() + "\",\"Password\":\"" +
+#pragma warning disable 612
+                            account.Password.Trim() + "\"},\"anonymousOrderACard\":false}";
+#pragma warning restore 612
+                httpRequest = new HttpRequestMessage(HttpMethod.Post,
+                    "https://www.prestocard.ca/api/sitecore/AFMSAuthentication/SignInWithAccount")
+                {
+                    Content = new StringContent(loginJson, Encoding.UTF8, "application/json")
+                };
+            }
+            else
+            {
+                // Create the anonymous login request
+                loginJson = "{\"anonymousOrderACard\":true,\"fareMediaId\":\"" + account.Username.Trim() + "\"}";
+                httpRequest = new HttpRequestMessage(HttpMethod.Post,
+                    "https://www.prestocard.ca/api/sitecore/AFMSAuthentication/SignInWithFareMedia")
+                {
+                    Content = new StringContent(loginJson, Encoding.UTF8, "application/json")
+                };
+            }
+
+            // Login to PRESTO and save the login result.       
+            var loginResult = client.SendAsync(httpRequest).Result.Content.ReadAsStringAsync().Result;
+
+
+            // Check for login errors. Aborts the function if any errors were detected.
+            // ReSharper disable once ConvertIfStatementToSwitchStatement
+            if (loginResult ==
+                "\"You could not be logged in to your online account. Please check your username and password and try again.\""
+            )
+            {
+                return ResponseCode.WrongUsernamePassword;
+            }
+            if (loginResult ==
+                "\"Your account has been locked as a result of three failed attempts to sign in. Please reset your password to access your account.\""
+            )
+            {
+                return ResponseCode.AccountLocked;
+            }
+            if (loginResult ==
+                "{\"result\":false,\"message\":\"Your PRESTO card is already registered to an account.Please log in using your username and password.\"}"
+            )
+            {
+                return ResponseCode.WrongType;
+            }
+            // ReSharper disable once ConvertIfStatementToReturnStatement
+            if (loginResult == "{\"result\":false,\"message\":\"Incorrect PRESTO card serial number\"}")
+            {
+                return ResponseCode.BadSerialCode;
+            }
+
+            return ResponseCode.AccessOk;
+        }
+        
+        [HttpPost("cart")]
+        public IActionResult AddToCart([FromBody] AccountRequest account, [FromQuery])
+        {            
+            var cookieContainer = new CookieContainer();
+            // Create an HttpClient instance to handle all web operations on the PRESTO card site for this account.
+            var client =
+                new HttpClient(new HttpClientHandler {UseCookies = true, CookieContainer = cookieContainer})
+                {
+                    BaseAddress = new Uri("https://www.prestocard.ca")
+                };
+            
+            // Login to PRESTO and save the login result.       
+            var loginResult = Login(account, ref client, ref cookieContainer);
+            if (loginResult != ResponseCode.AccessOk)
+            {
+                return BadRequest();
+            }
+
+            var uriBuilder = new UriBuilder("https://www.prestocard.ca/api/sitecore/ShoppingCart/AddCartLine")
+            {
+                Query = "ProductID=5637144811&ListPrice=$10.00&Concession=Adult&FareMediaID=04624415&Epurse=1"
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, uriBuilder.ToString())
+            {
+                Content = new StringContent("", Encoding.UTF8, "application/json")
+            };
+            
+            request.Headers.Add("Accept", "application/json, text/javascript, */*");
+            request.Headers.Add("Accept-Encoding", "gzip, deflate, br");
+            
+            var result = client.SendAsync(request).Result;
+            
+            Console.Out.WriteLine(result.Content.ReadAsStringAsync().Result);
+
+            return Ok();
         }
     }
 }
