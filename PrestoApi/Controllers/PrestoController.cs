@@ -6,6 +6,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using CsvHelper;
 using HtmlAgilityPack;
@@ -85,9 +86,9 @@ namespace PrestoApi.Controllers
             
 
             // Get the PRESTO dashboard
-            var nextResult = await client.GetAsync("/en/dashboard");
+            var nextResult = client.GetAsync("/en/dashboard").Result;
             // Using?
-            var newBody = await nextResult.Content.ReadAsStreamAsync();
+            var newBody = nextResult.Content.ReadAsStreamAsync().Result;
 
             // Load dashboard page into an XML Document for parsing
             var doc = new HtmlDocument();
@@ -152,7 +153,7 @@ namespace PrestoApi.Controllers
 
             foreach (var requestedAccount in request.Accounts)
             {
-                responses.Add(await GetAccountCards(requestedAccount, request.OmitExtraInfo));
+                responses.Add(GetAccountCards(requestedAccount, request.OmitExtraInfo).Result);
             }
 
             return responses;
@@ -191,8 +192,8 @@ namespace PrestoApi.Controllers
             }
 
             // Navigate to the PRESTO dashboard
-            var nextResult = await client.GetAsync("/en/dashboard");
-            var newBody = await nextResult.Content.ReadAsStreamAsync();
+            var nextResult = client.GetAsync("/en/dashboard").Result;
+            var newBody = nextResult.Content.ReadAsStreamAsync().Result;
 
             // Load dashboard page into an XML Document for parsing
             var doc = new HtmlDocument();
@@ -294,7 +295,7 @@ namespace PrestoApi.Controllers
                                 var csvRequest =
                                     client.GetAsync(
                                         "https://www.prestocard.ca/api/sitecore/Paginator/CardActivityExportCSV");
-                                var responseAsync = await csvRequest.Result.Content.ReadAsStreamAsync();
+                                var responseAsync = csvRequest.Result.Content.ReadAsStreamAsync().Result;
                                 var csv = new CsvReader(new StreamReader(responseAsync));
 
                                 csv.Configuration.RegisterClassMap<TransactionClassMap>();
@@ -363,6 +364,8 @@ namespace PrestoApi.Controllers
         /// <returns>A <see cref="ResponseCode"/></returns>
         private static int Login(AccountRequest account, ref HttpClient client, ref CookieContainer cookieContainer)
         {
+            if (account == null) return ResponseCode.OtherError;
+            
             // "Log in" using authentication token instead of username and password. 
             if (account.Auth != null)
             {
@@ -437,7 +440,7 @@ namespace PrestoApi.Controllers
         }
         
         [HttpPost("cart")]
-        public IActionResult AddToCart([FromBody] AccountRequest account, [FromQuery])
+        public IActionResult AddToCart([FromBody] AccountRequest account, [FromQuery] string test)
         {            
             var cookieContainer = new CookieContainer();
             // Create an HttpClient instance to handle all web operations on the PRESTO card site for this account.
@@ -472,6 +475,79 @@ namespace PrestoApi.Controllers
             Console.Out.WriteLine(result.Content.ReadAsStringAsync().Result);
 
             return Ok();
+        }
+
+        [HttpPost("cart/current")]
+        public IActionResult GetCart([FromBody] AccountRequest account)
+        {
+            var resultingCart = new Cart();
+                
+            var cookieContainer = new CookieContainer();
+            var client =
+                new HttpClient(new HttpClientHandler {UseCookies = true, CookieContainer = cookieContainer})
+                {
+                    BaseAddress = new Uri("https://www.prestocard.ca")
+                };
+
+            var loginResult = Login(account, ref client, ref cookieContainer);
+            if (loginResult != ResponseCode.AccessOk)
+            {
+                resultingCart.Error = "Error logging in.";
+                return BadRequest(resultingCart);
+            }
+            
+            var resultBody = client.GetAsync("/en/dashboard").Result.Content.ReadAsStreamAsync().Result;
+            var doc = new HtmlDocument();
+            doc.Load(resultBody);
+
+            // Select the <script> tag that contains JSON data for the current items in the user's cart.
+            var scripts = doc.DocumentNode.SelectSingleNode("//script[preceding::footer]");
+            var cartJson = Regex.Match(scripts.InnerText, @"({"")([^;]*)(})").Groups[0].Value;
+           
+            var json = JObject.Parse(cartJson);
+
+            resultingCart = new Cart
+            {
+                CardNumber = account.Cards[0],
+                Id = (string) json["CartID"],
+                SubTotal = decimal.Parse((string) json["SubTotalForMoneris"])
+            };
+
+            var fareMedias = (JArray) json["FareMedias"];
+            foreach (var t in fareMedias)
+            {
+                if ((string) t["VisibleId"] != account.Cards[0]) continue;
+                
+                var jsonProducts = (JArray) t["Products"];
+                foreach (var p in jsonProducts)
+                {
+                    var product = new Product
+                    {
+                        Concession = (string) p["Concession"],
+                        Id = (string) p["ProductID"],
+                        Name = (string) p["ProductName"],
+                        Price = decimal.Parse((string) p["ListPrice"], NumberStyles.Currency),
+                        Quantity = int.Parse((string) p["Quantity"]),
+                        LineItemId = (string) p["LineItemID"]
+                    };
+                        
+                    resultingCart.Products.Add(product);
+                }
+            }            
+            
+            return Ok(resultingCart);
+        }
+
+        /// <summary>
+        /// Gets the list of passes that the selected card is elegible for.
+        /// </summary>
+        /// <param name="account">The AccountRequest object for accessing the PRESTO site</param>
+        /// <param name="agency">The name of the Agency to look up passes for.</param>
+        /// <returns></returns>
+        [HttpGet("cart/passes")]
+        public IActionResult GetAvailablePasses([FromBody] AccountRequest account, [FromQuery] string agency)
+        {
+            return NotFound();
         }
     }
 }
