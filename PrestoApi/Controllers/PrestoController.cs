@@ -477,6 +477,13 @@ namespace PrestoApi.Controllers
             return Ok();
         }
 
+        /// <summary>
+        /// Gets the current shopping cart for a specific card in an account.
+        /// 
+        /// The AccountRequest object should only have a single card in the list. Onle one card's cart should be requested at a time.
+        /// </summary>
+        /// <param name="account">The account request.</param>
+        /// <returns></returns>
         [HttpPost("cart/current")]
         public IActionResult GetCart([FromBody] AccountRequest account)
         {
@@ -513,11 +520,14 @@ namespace PrestoApi.Controllers
                 SubTotal = decimal.Parse((string) json["SubTotalForMoneris"])
             };
 
+            // Gets all the carts for each cards
             var fareMedias = (JArray) json["FareMedias"];
             foreach (var t in fareMedias)
             {
+                // We're only interested in the cart for the requested card.
                 if ((string) t["VisibleId"] != account.Cards[0]) continue;
                 
+                // Gets all the products from each cart
                 var jsonProducts = (JArray) t["Products"];
                 foreach (var p in jsonProducts)
                 {
@@ -544,9 +554,44 @@ namespace PrestoApi.Controllers
         /// <param name="account">The AccountRequest object for accessing the PRESTO site</param>
         /// <param name="agency">The name of the Agency to look up passes for.</param>
         /// <returns></returns>
-        [HttpGet("cart/passes")]
+        [HttpPost("cart/passes")]
         public IActionResult GetAvailablePasses([FromBody] AccountRequest account, [FromQuery] string agency)
         {
+            var postContent =
+                $"{{productFieldDetails:{{\"AgencyName\":\"{agency}\",\"ProductImageSrc\":\"/~/media/AFMS/Images/addpressIcon.ashx\",\"Details\":\"Details\",\"AddCartButtonText\":\"Add To Cart\",\"SelectCatalog\":[\"6b084e0d-eb8d-5220-8056-2dd530a67c96\",\"6edcc4c3-f38d-5d28-9ab2-107720e2796d\"],\"SelectDateTimeFormat\":[{{\"__interceptors\":[{{}}],\"ID\":\"ea8402ab-c5ef-4473-ab5c-d3b499ea8ac6\",\"DateTimeFormat\":\"MM/dd/yyyy\"}}],\"ProductsNotAvailable\":\"A transit pass may be in your shopping cart already, or can’t be purchased at this time. Please proceed to checkout.\",\"ProductsNotAvailableError\":\"A transit pass may be in your shopping cart already, or can’t be purchased at this time. Please proceed to checkout.\",\"DetailsLinkAlt\":\"Show more details for {{0}}\",\"AddButtonAlt\":\"Add {{0}} to cart\",\"DetailsCloseAlt\":\"Close {{0}} details\",\"DetailsMDPLinkAlt\":\"View Discount Plan for {{0}}\",\"DetailsMDPCloseAlt\":\"Close {{0}} Payment Plan\",\"DescriptionMDP\":\"Save an average of XX% per month\",\"UrlMDP\":\"View Discount Plan\",\"ButtonTextMDP\":\"Sign Up\",\"PopupButtonTextMDP\":\"Sign Up\",\"PopupCancelButtonTextMDP\":\"Cancel\",\"PopupTextMDP\":\"You are being redirected to the TTC 12 Month Pass sign-up page where you can complete your transaction. If you have any items in your shopping cart, they will remain there until you have completed the TTC 12 Month Pass sign-up and must be processed separately. \",\"PaymentDetailsPopupTitle\":\"TTC 12 Month Pass Details\",\"PaymentDetailsPopupDescription\":\"The TTC 12 Month Pass is a subscription service that gives PRESTO users unlimited TTC travel at a discounted rate. The monthly discounts for the TTC 12 Month Pass period pass you have selected are shown below. In order to be eligible for the discount, you must be enrolled in the program throughout the entire term. If you cancel the contract before the conclusion of your term, you will be liable to pay TTC the discount amount you receive before cancellation. For full terms and conditions, please refer to the link in the Payment Details. \r\n\",\"PaymentDetailsPopupTableDescription\":\"{{0}} Discounts\",\"PaymentDetailsPopupColumnOne\":\"Term Month\",\"PaymentDetailsPopupColumnTwo\":\"Monthly Discount\",\"PaymentDetailsPopupColumnThree\":\"Discounted Monthly Price\"}}}}";
+            
+            var cookieContainer = new CookieContainer();
+            var client =
+                new HttpClient(new HttpClientHandler {UseCookies = true, CookieContainer = cookieContainer})
+                {
+                    BaseAddress = new Uri("https://www.prestocard.ca")
+                };
+
+            var loginResult = Login(account, ref client, ref cookieContainer);
+            if (loginResult != ResponseCode.AccessOk)
+            {
+                return BadRequest();
+            }
+
+            var message = new HttpRequestMessage(HttpMethod.Post, "https://www.prestocard.ca/api/sitecore/ShoppingCart/GetProductsList")
+            {
+                Content = new StringContent(postContent, Encoding.UTF8, "application/json")
+            };
+            
+            var result = client.SendAsync(message).Result.Content.ReadAsStreamAsync().Result;
+            var doc = new HtmlDocument();
+            doc.Load(result);
+
+            var items = doc.DocumentNode.SelectNodes(
+                "//div[contains(@class, 'row loadMyCard load-card__pass-container getselectorToHide')]");
+            
+            Console.WriteLine(items.Count);
+
+            foreach (var item in items)
+            {
+                
+            }
+            
             return NotFound();
         }
     }
