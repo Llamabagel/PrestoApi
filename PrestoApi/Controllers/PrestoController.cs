@@ -376,6 +376,7 @@ namespace PrestoApi.Controllers
                 
                 cookieContainer.Add(client.BaseAddress, new Cookie(".ASPXAUTH", account.Auth.Token));
                 cookieContainer.Add(client.BaseAddress, new Cookie("ASP.NET_SessionId", account.Auth.SessionId));
+                cookieContainer.Add(client.BaseAddress, new Cookie("cid", "0"));
                 
                 return ResponseCode.AccessOk;
             }
@@ -440,7 +441,7 @@ namespace PrestoApi.Controllers
         }
         
         [HttpPost("cart")]
-        public IActionResult AddToCart([FromBody] AccountRequest account, [FromQuery] string test)
+        public IActionResult AddToCart([FromBody] AccountRequest account, [FromQuery] string productId, [FromQuery] decimal value)
         {            
             var cookieContainer = new CookieContainer();
             // Create an HttpClient instance to handle all web operations on the PRESTO card site for this account.
@@ -457,10 +458,17 @@ namespace PrestoApi.Controllers
                 return BadRequest();
             }
 
+            var query =
+                $"ProductID={productId}&ListPrice={value}&Concession=Adult&FareMediaID={account.Cards[0].Substring(6, 8)}";
+            
+            // Checks whether the product being added is an Epurse value.
+            query += productId == "5637144811" ? "&Epurse=1" : "&Epurse=0";
+
             var uriBuilder = new UriBuilder("https://www.prestocard.ca/api/sitecore/ShoppingCart/AddCartLine")
             {
-                Query = "ProductID=5637144811&ListPrice=$10.00&Concession=Adult&FareMediaID=04624415&Epurse=1"
+                Query = query
             };
+            
 
             var request = new HttpRequestMessage(HttpMethod.Post, uriBuilder.ToString())
             {
