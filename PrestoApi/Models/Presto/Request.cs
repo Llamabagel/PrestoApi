@@ -72,5 +72,11 @@ namespace PrestoApi.Models.Presto
         /// Stored in a cookie named ASP.NET_SessionId
         /// </summary>
         public string SessionId { get; set; }
+        
+        /// <summary>
+        /// I don't really know what "cid" stands for, but it seems to have to do with the user's shopping cart.
+        /// Probably Cart Id?
+        /// </summary>
+        public string CId { get; set; }
     }
 }

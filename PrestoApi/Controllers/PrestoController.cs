@@ -376,7 +376,7 @@ namespace PrestoApi.Controllers
                 
                 cookieContainer.Add(client.BaseAddress, new Cookie(".ASPXAUTH", account.Auth.Token));
                 cookieContainer.Add(client.BaseAddress, new Cookie("ASP.NET_SessionId", account.Auth.SessionId));
-                cookieContainer.Add(client.BaseAddress, new Cookie("cid", "0"));
+                cookieContainer.Add(client.BaseAddress, new Cookie("cid", account.Auth.CId));
                 
                 return ResponseCode.AccessOk;
             }
