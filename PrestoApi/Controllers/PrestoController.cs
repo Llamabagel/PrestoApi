@@ -479,9 +479,13 @@ namespace PrestoApi.Controllers
             request.Headers.Add("Accept-Encoding", "gzip, deflate, br");
             
             var result = client.SendAsync(request).Result;
-            
-            Console.Out.WriteLine(result.Content.ReadAsStringAsync().Result);
 
+            if (result.Content.ReadAsStringAsync().Result == "\"failure\"" ||
+                result.Content.ReadAsStringAsync().Result == "\"failure_response\"")
+            {
+                return BadRequest();
+            }
+            
             return Ok();
         }
 
