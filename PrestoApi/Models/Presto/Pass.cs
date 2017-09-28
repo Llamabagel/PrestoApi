@@ -21,6 +21,11 @@ namespace PrestoApi.Models.Presto
         /// The price of the pass
         /// </summary>
         public decimal Price { get; set; }
+        
+        /// <summary>
+        /// The Product id for this pass.
+        /// </summary>
+        public string Id { get; set; }
     }
 
     /// <summary>

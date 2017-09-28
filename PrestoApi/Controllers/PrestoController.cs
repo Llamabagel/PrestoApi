@@ -471,7 +471,8 @@ namespace PrestoApi.Controllers
         /// <returns>The new list of ALL items in the cart.</returns>
         [HttpPost("cart")]
         public IActionResult AddToCart([FromBody] AccountRequest account, [FromQuery] string productId, [FromQuery] decimal value = 0)
-        {            
+        {
+            var resultingCart = new Cart();
             var cookieContainer = new CookieContainer();
             // Create an HttpClient instance to handle all web operations on the PRESTO card site for this account.
             var client =
@@ -484,7 +485,8 @@ namespace PrestoApi.Controllers
             var loginResult = Login(account, ref client, ref cookieContainer);
             if (loginResult != ResponseCode.AccessOk)
             {
-                return BadRequest();
+                resultingCart.Error = "Error logging in.";
+                return BadRequest(resultingCart);
             }
             
             // Nagivate to the requested card
@@ -515,16 +517,117 @@ namespace PrestoApi.Controllers
             if (result.Content.ReadAsStringAsync().Result == "\"failure\"" ||
                 result.Content.ReadAsStringAsync().Result == "\"failure_response\"")
             {
-                return BadRequest();
+                resultingCart.Error = "Failed to add item to cart";
+                return BadRequest(resultingCart);
             }
+
+            var cartJson = result.Content.ReadAsStringAsync().Result;
+            cartJson = cartJson.Substring(1, cartJson.Length - 2);
+            cartJson = cartJson.Replace("\\\"", "\"");
+
+            var json = JObject.Parse(cartJson);
             
-            return Ok();
+            resultingCart = new Cart
+            {
+                CardNumber = account.Cards[0],
+                Id = (string) json["CartID"],
+                SubTotal = decimal.Parse((string) json["SubTotalForMoneris"])
+            };
+
+            // Gets all the carts for each cards
+            var fareMedias = (JArray) json["FareMedias"];
+            foreach (var t in fareMedias)
+            {
+                // We're only interested in the cart for the requested card.
+                if ((string) t["VisibleId"] != account.Cards[0]) continue;
+                
+                // Gets all the products from each cart
+                var jsonProducts = (JArray) t["Products"];
+                foreach (var p in jsonProducts)
+                {
+                    var product = new Product
+                    {
+                        Concession = (string) p["Concession"],
+                        Id = (string) p["ProductID"],
+                        Name = (string) p["ProductName"],
+                        Price = decimal.Parse((string) p["ListPrice"], NumberStyles.Currency),
+                        Quantity = int.Parse((string) p["Quantity"]),
+                        LineItemId = (string) p["LineItemID"]
+                    };
+                        
+                    resultingCart.Products.Add(product);
+                }
+            }            
+            
+            return Ok(resultingCart);
         }
 
         [HttpDelete("cart")]
         public IActionResult RemoveFromCart([FromBody] AccountRequest account, [FromQuery] string lineItemId)
         {
-            return Ok();
+            var resultingCart = new Cart();
+            var cookieContainer = new CookieContainer();
+            var client =
+                new HttpClient(new HttpClientHandler {UseCookies = true, CookieContainer = cookieContainer})
+                {
+                    BaseAddress = new Uri("https://www.prestocard.ca")
+                };
+
+            var loginResult = Login(account, ref client, ref cookieContainer);
+            if (loginResult != ResponseCode.AccessOk)
+            {
+                resultingCart.Error = "Error logging in";
+                return BadRequest(resultingCart);
+            }
+            
+            // Navigate to the requested card
+            GoToCard(ref client, account.Cards[0]);
+            
+            var url =
+                $"https://www.prestocard.ca/api/sitecore/ShoppingCart/RemoveLineItem?ID={lineItemId}";
+            
+            var requestMessage = new HttpRequestMessage(HttpMethod.Post, url);
+            var result = client.SendAsync(requestMessage).Result;
+            
+            var cartJson = result.Content.ReadAsStringAsync().Result;
+            cartJson = cartJson.Substring(1, cartJson.Length - 2);
+            cartJson = cartJson.Replace("\\\"", "\"");
+
+            var json = JObject.Parse(cartJson);
+                        
+            resultingCart = new Cart
+            {
+                CardNumber = account.Cards[0],
+                Id = (string) json["CartID"],
+                SubTotal = decimal.Parse((string) json["SubTotalForMoneris"])
+            };
+
+            // Gets all the carts for each cards
+            var fareMedias = (JArray) json["FareMedias"];
+            foreach (var t in fareMedias)
+            {
+                // We're only interested in the cart for the requested card.
+                if ((string) t["VisibleId"] != account.Cards[0]) continue;
+                
+                // Gets all the products from each cart
+                var jsonProducts = (JArray) t["Products"];
+                foreach (var p in jsonProducts)
+                {
+                    var product = new Product
+                    {
+                        Concession = (string) p["Concession"],
+                        Id = (string) p["ProductID"],
+                        Name = (string) p["ProductName"],
+                        Price = decimal.Parse((string) p["ListPrice"], NumberStyles.Currency),
+                        Quantity = int.Parse((string) p["Quantity"]),
+                        LineItemId = (string) p["LineItemID"]
+                    };
+                        
+                    resultingCart.Products.Add(product);
+                }
+            }            
+            
+            return Ok(resultingCart);
         }
         
         /// <summary>
