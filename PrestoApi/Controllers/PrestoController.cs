@@ -439,9 +439,38 @@ namespace PrestoApi.Controllers
 
             return ResponseCode.AccessOk;
         }
+
+        /// <summary>
+        /// Navigates the user to the page for a specific card.
+        /// 
+        /// If you want to perform operations on a different card than the user's default card, you MUST call this method
+        /// </summary>
+        /// <param name="client">The HttpClient being used. By Reference</param>
+        /// <param name="cardNumber">The number of the card to navigate to.</param>
+        private static void GoToCard(ref HttpClient client, string cardNumber)
+        {
+            // Create an Http request that will change the dashboard to display a different card
+            var cardHttpRequest = new HttpRequestMessage(HttpMethod.Post,
+                "https://www.prestocard.ca/api/sitecore/Global/UpdateFareMediaSession?id=lowerFareMediaId&class=lowerFareMediaId")
+            {
+                Content = new StringContent("setFareMediaSession=" + cardNumber,
+                    Encoding.UTF8, "application/x-www-form-urlencoded")
+            };
+            var unused = client.SendAsync(cardHttpRequest).Result;
+        }
         
+        /// <summary>
+        /// This method will add an item to the user's cart.
+        /// 
+        /// If successful, this method will return the complete list of EVERYTHING in the user's cart. There's no way to differentiate
+        /// between the existing items and items that were just added to the cart.
+        /// </summary>
+        /// <param name="account">The account request containing the (single) card to add an item to</param>
+        /// <param name="productId">The id of the product to add</param>
+        /// <param name="value">If it's the epurse product, this is the amount of money to add</param>
+        /// <returns>The new list of ALL items in the cart.</returns>
         [HttpPost("cart")]
-        public IActionResult AddToCart([FromBody] AccountRequest account, [FromQuery] string productId, [FromQuery] decimal value)
+        public IActionResult AddToCart([FromBody] AccountRequest account, [FromQuery] string productId, [FromQuery] decimal value = 0)
         {            
             var cookieContainer = new CookieContainer();
             // Create an HttpClient instance to handle all web operations on the PRESTO card site for this account.
@@ -457,6 +486,9 @@ namespace PrestoApi.Controllers
             {
                 return BadRequest();
             }
+            
+            // Nagivate to the requested card
+            GoToCard(ref client, account.Cards[0]);
 
             var query =
                 $"ProductID={productId}&ListPrice={value}&Concession=Adult&FareMediaID={account.Cards[0].Substring(6, 8)}";
@@ -489,6 +521,12 @@ namespace PrestoApi.Controllers
             return Ok();
         }
 
+        [HttpDelete("cart")]
+        public IActionResult RemoveFromCart([FromBody] AccountRequest account, [FromQuery] string lineItemId)
+        {
+            return Ok();
+        }
+        
         /// <summary>
         /// Gets the current shopping cart for a specific card in an account.
         /// 
@@ -514,6 +552,9 @@ namespace PrestoApi.Controllers
                 resultingCart.Error = "Error logging in.";
                 return BadRequest(resultingCart);
             }
+            
+            // Navigate to the requested card
+            GoToCard(ref client, account.Cards[0]);
             
             var resultBody = client.GetAsync("/en/dashboard").Result.Content.ReadAsStreamAsync().Result;
             var doc = new HtmlDocument();
@@ -584,6 +625,9 @@ namespace PrestoApi.Controllers
             {
                 return BadRequest();
             }
+            
+            // Navigate to the requested card.
+            GoToCard(ref client, account.Cards[0]);
 
             var message = new HttpRequestMessage(HttpMethod.Post, "https://www.prestocard.ca/api/sitecore/ShoppingCart/GetProductsList")
             {
