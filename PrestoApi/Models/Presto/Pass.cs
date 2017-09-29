@@ -33,6 +33,11 @@ namespace PrestoApi.Models.Presto
     /// </summary>
     public class PassResponse
     {
+        public PassResponse()
+        {
+            Passes = new List<Pass>();
+        }
+        
         /// <summary>
         /// Any errors to report
         /// </summary>

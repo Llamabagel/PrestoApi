@@ -713,6 +713,7 @@ namespace PrestoApi.Controllers
         [HttpPost("cart/passes")]
         public IActionResult GetAvailablePasses([FromBody] AccountRequest account, [FromQuery] string agency)
         {
+            var passResponse = new PassResponse();
             var postContent =
                 $"{{productFieldDetails:{{\"AgencyName\":\"{agency}\",\"ProductImageSrc\":\"/~/media/AFMS/Images/addpressIcon.ashx\",\"Details\":\"Details\",\"AddCartButtonText\":\"Add To Cart\",\"SelectCatalog\":[\"6b084e0d-eb8d-5220-8056-2dd530a67c96\",\"6edcc4c3-f38d-5d28-9ab2-107720e2796d\"],\"SelectDateTimeFormat\":[{{\"__interceptors\":[{{}}],\"ID\":\"ea8402ab-c5ef-4473-ab5c-d3b499ea8ac6\",\"DateTimeFormat\":\"MM/dd/yyyy\"}}],\"ProductsNotAvailable\":\"A transit pass may be in your shopping cart already, or can’t be purchased at this time. Please proceed to checkout.\",\"ProductsNotAvailableError\":\"A transit pass may be in your shopping cart already, or can’t be purchased at this time. Please proceed to checkout.\",\"DetailsLinkAlt\":\"Show more details for {{0}}\",\"AddButtonAlt\":\"Add {{0}} to cart\",\"DetailsCloseAlt\":\"Close {{0}} details\",\"DetailsMDPLinkAlt\":\"View Discount Plan for {{0}}\",\"DetailsMDPCloseAlt\":\"Close {{0}} Payment Plan\",\"DescriptionMDP\":\"Save an average of XX% per month\",\"UrlMDP\":\"View Discount Plan\",\"ButtonTextMDP\":\"Sign Up\",\"PopupButtonTextMDP\":\"Sign Up\",\"PopupCancelButtonTextMDP\":\"Cancel\",\"PopupTextMDP\":\"You are being redirected to the TTC 12 Month Pass sign-up page where you can complete your transaction. If you have any items in your shopping cart, they will remain there until you have completed the TTC 12 Month Pass sign-up and must be processed separately. \",\"PaymentDetailsPopupTitle\":\"TTC 12 Month Pass Details\",\"PaymentDetailsPopupDescription\":\"The TTC 12 Month Pass is a subscription service that gives PRESTO users unlimited TTC travel at a discounted rate. The monthly discounts for the TTC 12 Month Pass period pass you have selected are shown below. In order to be eligible for the discount, you must be enrolled in the program throughout the entire term. If you cancel the contract before the conclusion of your term, you will be liable to pay TTC the discount amount you receive before cancellation. For full terms and conditions, please refer to the link in the Payment Details. \r\n\",\"PaymentDetailsPopupTableDescription\":\"{{0}} Discounts\",\"PaymentDetailsPopupColumnOne\":\"Term Month\",\"PaymentDetailsPopupColumnTwo\":\"Monthly Discount\",\"PaymentDetailsPopupColumnThree\":\"Discounted Monthly Price\"}}}}";
             
@@ -726,7 +727,8 @@ namespace PrestoApi.Controllers
             var loginResult = Login(account, ref client, ref cookieContainer);
             if (loginResult != ResponseCode.AccessOk)
             {
-                return BadRequest();
+                passResponse.Error = "Unable to log in";
+                return BadRequest(passResponse);
             }
             
             // Navigate to the requested card.
@@ -736,22 +738,49 @@ namespace PrestoApi.Controllers
             {
                 Content = new StringContent(postContent, Encoding.UTF8, "application/json")
             };
+
+            var result = client.SendAsync(message).Result.Content.ReadAsStringAsync().Result;
+            // Do some pre parsing 
+            result = result.Substring(1, result.Length - 2);
+            result = result.Replace("\\u003e", ">");
+            result = result.Replace("\\u003c", "<");
+            result = result.Replace("\\\"", "\"");
+            result = result.Replace("\\r\\n", "");
+            // Console.WriteLine(result); 
             
-            var result = client.SendAsync(message).Result.Content.ReadAsStreamAsync().Result;
+           
+            //var result = client.SendAsync(message).Result.Content.ReadAsStreamAsync().Result;
             var doc = new HtmlDocument();
-            doc.Load(result);
+            doc.LoadHtml(result);
 
-            var items = doc.DocumentNode.SelectNodes(
-                "//div[contains(@class, 'row loadMyCard load-card__pass-container getselectorToHide')]");
+            // Determines the number of products in the result
+            var items = doc.DocumentNode.SelectNodes("//div[@class=\"row loadMyCard load-card__pass-container getselectorToHide \"]");
             
-            Console.WriteLine(items.Count);
+            // Gets the list of the required DOM nodes. Need to get them all now... stupid xpath queries.
+            var names = doc.DocumentNode.SelectNodes("//div[@class=\"col-xs-12 col-md-7\"]/div[1]/span");
+            var dateRanges = doc.DocumentNode.SelectNodes("//div[@class=\"col-xs-12 col-md-7\"]/div[2]//span[2]");
+            var prices = doc.DocumentNode
+                .SelectNodes(
+                    "//div[@class=\"col-xs-12 col-md-7\"]/div[3]/div[@class=\"modal-dialog modal-sm description load-card__details-modal\"]/div[@class=\"modal-content\"]/div[2]/div[1]/div[2]/span[@class=\"modal-price\"]");
 
-            foreach (var item in items)
+            var ids = doc.DocumentNode
+                .SelectNodes(
+                    "//div[@class=\"col-xs-12 col-md-5\"]/div[2]/button[@data-productcollection=\"AddPasses_Available_Products\"]");
+            
+            for (var i = 0; i < items.Count; i++)
             {
+                var pass = new Pass
+                {
+                    Name = names[i].InnerText,
+                    DateRange = dateRanges[i].InnerText,
+                    Price = decimal.Parse(prices[i].InnerText, NumberStyles.Currency),
+                    Id = ids[i].GetAttributeValue("id", "")
+                };
                 
+                passResponse.Passes.Add(pass);
             }
             
-            return NotFound();
+            return Ok(passResponse);
         }
     }
 }
