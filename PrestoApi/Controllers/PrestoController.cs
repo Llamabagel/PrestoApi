@@ -778,5 +778,35 @@ namespace PrestoApi.Controllers
             
             return Ok(passResponse);
         }
+
+        /// <summary>
+        /// Renames a user's PRESTO card
+        /// </summary>
+        /// <param name="request">The account request. Should only contain one card number. Only the first will be renamed</param>
+        /// <param name="newName">The new name to assign to the PRESTO card.</param>
+        /// <returns></returns>
+        [HttpPost("rename")]
+        public IActionResult RenameCard([FromBody] AccountRequest request, [FromQuery] string newName)
+        {
+            var cookieContainer = new CookieContainer();
+            var client =
+                new HttpClient(new HttpClientHandler {UseCookies = true, CookieContainer = cookieContainer})
+                {
+                    BaseAddress = new Uri("https://www.prestocard.ca")
+                };
+
+            var loginResult = Login(request, ref client, ref cookieContainer);
+            if (loginResult != ResponseCode.AccessOk)
+            {
+                return BadRequest();
+            }
+            
+            var url = "https://www.prestocard.ca/api/sitecore/Workflow/ChangeNicknamePost" +
+                      $"?VisibleId={request.Cards[0]}&Nickname={System.Uri.EscapeDataString(newName)}";
+
+            var result = client.PostAsync(url, null).Result;
+            
+            return result.StatusCode == HttpStatusCode.OK ? (IActionResult) Ok() : BadRequest();
+        }
     }
 }
