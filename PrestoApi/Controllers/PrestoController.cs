@@ -118,15 +118,11 @@ namespace PrestoApi.Controllers
                 for (var i = 0; i < fareCount; i++)
                 {
                     var fare = o["AutoRenewManageVM"]["Customer"]["FareMedias"][i];
-                    // Status = 1 means valid card(?)
-                    if ((int) fare["Status"] == 1)
+                    summaryAccount.Cards.Add(new SummaryCard
                     {
-                        summaryAccount.Cards.Add(new SummaryCard
-                        {
-                            Name = (string) fare["NickName"] != "" ? (string) fare["NickName"] : "Your Card",
-                            Number = (string) fare["VisibleId"]
-                        });
-                    }
+                        Name = (string) fare["NickName"] != "" ? (string) fare["NickName"] : "Your Card",
+                        Number = (string) fare["VisibleId"]
+                    });
                 }
             }
             else
