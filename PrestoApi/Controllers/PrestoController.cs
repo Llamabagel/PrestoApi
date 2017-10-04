@@ -39,7 +39,7 @@ namespace PrestoApi.Controllers
                 return BadRequest();
             }
 
-            return Ok(GetAccountContent(value).Result);
+            return Ok(GetAccountContent(value));
         }
 
         // POST api/summary
@@ -137,7 +137,7 @@ namespace PrestoApi.Controllers
             return summaryAccount;
         }
 
-        private static async Task<IList<Response>> GetAccountContent(Request request)
+        private static IList<Response> GetAccountContent(Request request)
         {
             // Updates the TransactionJsonRequest to force it to take the current date for getting transactions
             TransactionJsonRequest["SelectedMonth"] = "07/24/2009 - " +
@@ -147,10 +147,15 @@ namespace PrestoApi.Controllers
             // List of responses to collect
             var responses = new List<Response>();
 
-            foreach (var requestedAccount in request.Accounts)
+            Parallel.ForEach(request.Accounts, accountRequest =>
+            {
+                responses.Add(GetAccountCards(accountRequest, request.OmitExtraInfo).Result);
+            });
+            
+            /*foreach (var requestedAccount in request.Accounts)
             {
                 responses.Add(GetAccountCards(requestedAccount, request.OmitExtraInfo).Result);
-            }
+            }*/
 
             return responses;
         }
