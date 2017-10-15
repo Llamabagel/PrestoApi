@@ -15,6 +15,7 @@
  *  along with Llamabagel's Presto Api.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+using System;
 using System.Collections.Generic;
 
 namespace PrestoApi.Models.Presto

@@ -72,6 +72,24 @@ namespace PrestoApi.Controllers
             return Ok(GetAccountSummary(value).Result);
         }
 
+        private static HttpRequestMessage MakePrestoRequestMessage(Auth authData, HttpMethod method, string url, HttpContent content = null)
+        {
+            // Create an Http request that will change the dashboard to display a different card
+            var httpRequest = new HttpRequestMessage(method, url);
+
+            if (content != null)
+            {
+                httpRequest.Content = content;
+            }
+
+            // Add auth cookies to request
+            httpRequest.Headers.TryAddWithoutValidation("Cookie", $".ASPXAUTH={authData.Token}; ASP.NET_SessionId={authData.SessionId}; cid={authData.CId};");
+
+            Console.WriteLine(httpRequest.Headers.GetValues("Cookie"));
+
+            return httpRequest;
+        }
+
         /// <summary>
         /// Gets the PRESTO summary of a given PRESTO account.
         /// </summary>
@@ -185,6 +203,9 @@ namespace PrestoApi.Controllers
         /// <returns>Response data for the account</returns>
         private static async Task<Response> GetAccountCards(AccountRequest account, bool omitExtraInfo)
         {
+            // Whether the request is using the new Auth object authentication model
+            var usingAuthData = account.Auth != null;
+            
             var newResponse = new Response
             {
                 Username = account.Username.Trim(),
@@ -192,12 +213,25 @@ namespace PrestoApi.Controllers
             };
 
             var cookieContainer = new CookieContainer();
-            // Create an HttpClient instance to handle all web operations on the PRESTO card site for this account.
-            var client =
-                new HttpClient(new HttpClientHandler {UseCookies = true, CookieContainer = cookieContainer})
+
+            HttpClient client;
+
+            if (usingAuthData)
+            {
+                client = new HttpClient(new HttpClientHandler {UseCookies = false})
                 {
                     BaseAddress = new Uri("https://www.prestocard.ca")
                 };
+            }
+            else
+            {
+                // Create an HttpClient instance to handle all web operations on the PRESTO card site for this account.
+                client =
+                    new HttpClient(new HttpClientHandler {UseCookies = true, CookieContainer = cookieContainer})
+                    {
+                        BaseAddress = new Uri("https://www.prestocard.ca")
+                    };
+            }
 
             // Login to the PRESTO website.
             var loginResult = Login(account, ref client, ref cookieContainer);
@@ -210,7 +244,16 @@ namespace PrestoApi.Controllers
             }
 
             // Navigate to the PRESTO dashboard
-            var nextResult = client.GetAsync("/en/dashboard").Result;
+            HttpResponseMessage nextResult;
+            if (usingAuthData)
+            {
+                nextResult = client.SendAsync(MakePrestoRequestMessage(account.Auth, HttpMethod.Get, "https://www.prestocard.ca/en/dashboard"))
+                    .Result;
+            }
+            else
+            {
+                nextResult = client.GetAsync("https://www.prestocard.ca/en/dashboard").Result;
+            }
             var newBody = nextResult.Content.ReadAsStreamAsync().Result;
 
             // Load dashboard page into an XML Document for parsing
@@ -220,11 +263,22 @@ namespace PrestoApi.Controllers
             // Finds a <script> element containing a LOT of useful JSON data about the accounts's cards
             // This allows us to avoid needing to parse through the rest of the HTML to find the required information
             // for each presto card.
-            var scriptTag = doc.DocumentNode
-                .Descendants()
-                .Single(n => n.GetAttributeValue("class", "").Equals("col-xs-12 col-md-3 layout-two-cols__left"))
-                .Descendants("script")
-                .Single();
+
+            HtmlNode scriptTag;
+            try
+            {
+                scriptTag = doc.DocumentNode
+                    .Descendants()
+                    .Single(n => n.GetAttributeValue("class", "").Equals("col-xs-12 col-md-3 layout-two-cols__left"))
+                    .Descendants("script")
+                    .Single();
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(doc.DocumentNode.SelectSingleNode("//title").InnerText);
+                newResponse.Error = ResponseCode.OtherError;
+                return newResponse;
+            }
 
             // Takes out uneccessary JS fragments from the <script> tag.
             // Strips the start of the javascript out
@@ -247,7 +301,7 @@ namespace PrestoApi.Controllers
                     var fare = data["AutoRenewManageVM"]["Customer"]["FareMedias"][j];
                     // Status = 1 means valid card(?)
                     // Checks to make sure that the fare card is one of the requested cards for the account
-                    if ((int) fare["Status"] == 1 && account.Cards.Contains((string) fare["VisibleId"]))
+                    if (account.Cards.Contains((string) fare["VisibleId"]))
                     {
                         // Creates a new skeleton response object for the selected card. Contains the nickname, number, and expiry date of the card.
                         var card = new CardResponse
@@ -284,24 +338,47 @@ namespace PrestoApi.Controllers
                         // Transactions are considered "Extra Info"
                         if (!omitExtraInfo)
                         {
-                            // Create an Http request that will change the dashboard to display a different card
-                            var cardHttpRequest = new HttpRequestMessage(HttpMethod.Post,
-                                "https://www.prestocard.ca/api/sitecore/Global/UpdateFareMediaSession?id=lowerFareMediaId&class=lowerFareMediaId")
+                            HttpRequestMessage cardHttpRequest;
+                            if (usingAuthData)
                             {
-                                Content = new StringContent("setFareMediaSession=" + card.Number,
-                                    Encoding.UTF8, "application/x-www-form-urlencoded")
-                            };
+                                cardHttpRequest = MakePrestoRequestMessage(account.Auth, HttpMethod.Post,
+                                    "https://www.prestocard.ca/api/sitecore/Global/UpdateFareMediaSession?id=lowerFareMediaId&class=lowerFareMediaId",
+                                    new StringContent("setFareMediaSession=" + card.Number,
+                                        Encoding.UTF8, "application/x-www-form-urlencoded"));
+                            }
+                            else
+                            {
+                                // Create an Http request that will change the dashboard to display a different card
+                                cardHttpRequest = new HttpRequestMessage(HttpMethod.Post,
+                                    "https://www.prestocard.ca/api/sitecore/Global/UpdateFareMediaSession?id=lowerFareMediaId&class=lowerFareMediaId")
+                                {
+                                    Content = new StringContent("setFareMediaSession=" + card.Number,
+                                        Encoding.UTF8, "application/x-www-form-urlencoded")
+                                };
+                            }
+                            
                             await client.SendAsync(cardHttpRequest);
 
                             try
                             {
-                                // Modify the CardActivity Filter to display trasaction history as far back as possible
-                                var transactionHttpRequest = new HttpRequestMessage(HttpMethod.Post,
-                                    "https://www.prestocard.ca/api/sitecore/Paginator/CardActivityFilteredIndex")
+                                HttpRequestMessage transactionHttpRequest;
+                                if (usingAuthData)
                                 {
-                                    Content = new StringContent(TransactionJsonRequest.ToString(),
-                                        Encoding.UTF8, "application/json")
-                                };
+                                    transactionHttpRequest = MakePrestoRequestMessage(account.Auth, HttpMethod.Post,
+                                        "https://www.prestocard.ca/api/sitecore/Paginator/CardActivityFilteredIndex",
+                                        new StringContent(TransactionJsonRequest.ToString(),
+                                            Encoding.UTF8, "application/json"));
+                                }
+                                else
+                                {
+                                    // Modify the CardActivity Filter to display trasaction history as far back as possible
+                                    transactionHttpRequest = new HttpRequestMessage(HttpMethod.Post,
+                                        "https://www.prestocard.ca/api/sitecore/Paginator/CardActivityFilteredIndex")
+                                    {
+                                        Content = new StringContent(TransactionJsonRequest.ToString(),
+                                            Encoding.UTF8, "application/json")
+                                    };
+                                }
 
                                 transactionHttpRequest.Headers.Add("accept", "*/*");
                                 transactionHttpRequest.Headers.Add("accept-encoding", "gzip, deflate, br");
@@ -310,9 +387,19 @@ namespace PrestoApi.Controllers
                                 await client.SendAsync(transactionHttpRequest);
 
                                 // Exports the user's transaction history to a CSV file
-                                var csvRequest =
-                                    client.GetAsync(
-                                        "https://www.prestocard.ca/api/sitecore/Paginator/CardActivityExportCSV");
+                                Task<HttpResponseMessage> csvRequest;
+                                if (usingAuthData)
+                                {
+                                    csvRequest = client.SendAsync(MakePrestoRequestMessage(account.Auth, HttpMethod.Get,
+                                            "https://www.prestocard.ca/api/sitecore/Paginator/CardActivityExportCSV"));
+                                }
+                                else
+                                {
+                                    
+                                    csvRequest =
+                                        client.GetAsync(
+                                            "https://www.prestocard.ca/api/sitecore/Paginator/CardActivityExportCSV");
+                                }
                                 var responseAsync = csvRequest.Result.Content.ReadAsStreamAsync().Result;
                                 var csv = new CsvReader(new StreamReader(responseAsync));
 
@@ -387,14 +474,16 @@ namespace PrestoApi.Controllers
             // "Log in" using authentication token instead of username and password. 
             if (account.Auth != null)
             {
+                var cookieUri = new Uri("https://www.prestocard.ca");
+                
                 if (string.IsNullOrEmpty(account.Auth.Token) || string.IsNullOrEmpty(account.Auth.SessionId))
                 {
                     return ResponseCode.BadAuth;
                 }
                 
-                cookieContainer.Add(client.BaseAddress, new Cookie(".ASPXAUTH", account.Auth.Token));
-                cookieContainer.Add(client.BaseAddress, new Cookie("ASP.NET_SessionId", account.Auth.SessionId));
-                cookieContainer.Add(client.BaseAddress, new Cookie("cid", account.Auth.CId));
+                cookieContainer.Add(cookieUri, new Cookie(".ASPXAUTH", account.Auth.Token));
+                cookieContainer.Add(cookieUri, new Cookie("ASP.NET_SessionId", account.Auth.SessionId));
+                cookieContainer.Add(cookieUri, new Cookie("cid", account.Auth.CId));
                 
                 return ResponseCode.AccessOk;
             }
