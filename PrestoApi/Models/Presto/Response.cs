@@ -216,6 +216,16 @@ namespace PrestoApi.Models.Presto
         public const int BadSerialCode = 30;
 
         /// <summary>
+        /// The PRESTO website is down for maintenance
+        /// </summary>
+        public const int PrestoMaintenance = 60;
+
+        /// <summary>
+        /// The PRESTO website is unavailable for some reason.
+        /// </summary>
+        public const int PrestoUnavailable = 70;
+
+        /// <summary>
         /// Just in case anything else explodes or something
         /// </summary>
         public const int OtherError = -1;
