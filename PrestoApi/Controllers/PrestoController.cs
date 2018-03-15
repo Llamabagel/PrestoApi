@@ -85,8 +85,6 @@ namespace PrestoApi.Controllers
             // Add auth cookies to request
             httpRequest.Headers.TryAddWithoutValidation("Cookie", $".ASPXAUTH={authData.Token}; ASP.NET_SessionId={authData.SessionId}; cid={authData.CId};");
 
-            Console.WriteLine(httpRequest.Headers.GetValues("Cookie"));
-
             return httpRequest;
         }
 
@@ -273,9 +271,8 @@ namespace PrestoApi.Controllers
                     .Descendants("script")
                     .Single();
             }
-            catch (Exception e)
+            catch (Exception)
             {
-                Console.WriteLine(doc.DocumentNode.SelectSingleNode("//title").InnerText);
                 newResponse.Error = ResponseCode.OtherError;
                 return newResponse;
             }
@@ -410,9 +407,9 @@ namespace PrestoApi.Controllers
                                 var transactions = csv.GetRecords<TransactionResponse>().ToList();
                                 card.Transactions = transactions;
                             }
-                            catch (Exception e)
+                            catch (Exception)
                             {
-                                Console.Out.Write(e.Message);
+                                // ignored
                             }
                         }
 
@@ -492,6 +489,7 @@ namespace PrestoApi.Controllers
             HttpRequestMessage httpRequest;
             if (account.Type == Models.Presto.Request.TypeRegistered)
             {
+                var token = GetRequestVerificationToken(ref client, account.Type);
                 // Create the login request
                 loginJson = "{\"custSecurity\":{\"Login\":\"" + account.Username.Trim() + "\",\"Password\":\"" +
 #pragma warning disable 612
@@ -502,9 +500,12 @@ namespace PrestoApi.Controllers
                 {
                     Content = new StringContent(loginJson, Encoding.UTF8, "application/json")
                 };
+                httpRequest.Headers.Add("__RequestVerificationToken", token);
+                httpRequest.Headers.Add("X-Requested-With", "XMLHttpRequest");
             }
             else
             {
+                var token = GetRequestVerificationToken(ref client, account.Type);
                 // Create the anonymous login request
                 loginJson = "{\"anonymousOrderACard\":true,\"fareMediaId\":\"" + account.Username.Trim() + "\"}";
                 httpRequest = new HttpRequestMessage(HttpMethod.Post,
@@ -512,6 +513,8 @@ namespace PrestoApi.Controllers
                 {
                     Content = new StringContent(loginJson, Encoding.UTF8, "application/json")
                 };
+                httpRequest.Headers.Add("__RequestVerificationToken", token);
+                httpRequest.Headers.Add("X-Requested-With", "XMLHttpRequest");
             }
 
             // Login to PRESTO and save the login result.       
@@ -852,11 +855,8 @@ namespace PrestoApi.Controllers
             result = result.Replace("\\u003e", ">");
             result = result.Replace("\\u003c", "<");
             result = result.Replace("\\\"", "\"");
-            result = result.Replace("\\r\\n", "");
-            // Console.WriteLine(result); 
-            
+            result = result.Replace("\\r\\n", "");            
            
-            //var result = client.SendAsync(message).Result.Content.ReadAsStreamAsync().Result;
             var doc = new HtmlDocument();
             doc.LoadHtml(result);
 
@@ -918,6 +918,21 @@ namespace PrestoApi.Controllers
             var result = client.PostAsync(url, null).Result;
             
             return result.StatusCode == HttpStatusCode.OK ? (IActionResult) Ok() : BadRequest();
+        }
+        
+        private static string GetRequestVerificationToken(ref HttpClient client, string type)
+        {
+            var tokenRequest = client.GetAsync("https://www.prestocard.ca/en/").Result;
+                        
+            var document = new HtmlDocument();
+            document.Load(tokenRequest.Content.ReadAsStreamAsync().Result);
+            
+            var descendants = document.DocumentNode
+                .Descendants();
+
+            var nodes = from d in descendants where d.GetAttributeValue("name", "") == "__RequestVerificationToken" select d;
+            
+            return type == Models.Presto.Request.TypeRegistered ? nodes.ToList()[1].Attributes["value"].Value : nodes.ToList()[2].Attributes["value"].Value;
         }
     }
 }
